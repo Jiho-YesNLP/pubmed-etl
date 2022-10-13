@@ -5,7 +5,7 @@ import glob
 import sys
 import os
 import json
-import multiprocessing
+import multiprocessing as mp
 
 from tqdm import tqdm
 
@@ -42,19 +42,23 @@ def convert(f):
             authors = []
             for p in cit.xpath('Article/AuthorList/Author'):
                 name = ''
-                if p.xpath('LastName'):
-                    name += p.xpath('LastName')[0].text
-                if p.xpath('ForeName'):
-                    name = p.xpath('ForeName')[0].text + ' ' + name
-                if p.xpath('CollectiveName'):
-                    name = p.xpath('CollectiveName')[0].text
+                try:
+                    if p.xpath('LastName'):
+                        name += p.xpath('LastName')[0].text
+                    if p.xpath('ForeName'):
+                        name = p.xpath('ForeName')[0].text + ' ' + name
+                    if p.xpath('CollectiveName'):
+                        name = p.xpath('CollectiveName')[0].text
+                except:
+                    name = 'unnamed'
                 authors.append(name)
             doc['Authors'] = authors
             # Abstract
             doc['Abstract'] = ' '.join(
                 cit.xpath('Article/Abstract/AbstractText/text()'))
             # Keywords
-            doc['Keywords'] = cit.xpath('Article/KeywordList/Keyword/text()')
+            keywords = cit.xpath('KeywordList/Keyword/text()')
+            doc['Keywords'] = [' '.join(kw.split()) for kw in keywords]
             # Journal
             doc['Journal'] = cit.xpath('Article/Journal/Title/text()')[0]
             json.dump({'index': {'_index': 'pubmed', '_id': doc['PMID']}},
@@ -62,6 +66,21 @@ def convert(f):
             out_fh.write('\n')
             json.dump(doc, out_fh)
             out_fh.write('\n')
+    return f
+
+
+def read_pubmed_files(files):
+    cnt = 0
+    def cb_update(r):
+        nonlocal cnt
+        cnt += 1
+        print(f'#doc {cnt} [{r}]\r', end='')
+
+    pool = mp.Pool(int(.7 * mp.cpu_count()))
+    for f in files:
+        pool.apply_async(convert, (f,), callback=cb_update)
+    pool.close()
+    pool.join()
 
 
 if __name__ == '__main__':
@@ -74,8 +93,10 @@ if __name__ == '__main__':
 
     files = [glob.glob(os.path.join(indir, e)) for e in ['*.xml', '*.gz']]
     files = [file for sublist in files for file in sublist]
-    with multiprocessing.Pool() as pool:
-        r = list(tqdm(pool.imap(convert, files), total=len(files)))
+    print('Reading pubmed XML files...')
+    read_pubmed_files(files)
+    # with multiprocessing.Pool() as pool:
+    #     r = list(tqdm(pool.imap(convert, files), total=len(files)))
 
 
 
